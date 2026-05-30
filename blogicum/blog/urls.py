@@ -22,5 +22,4 @@ urlpatterns = [
     path('profile/edit/', views.ProfileEditView.as_view(),
          name='edit_profile'),
     path('profile/<str:username>/', views.profile, name='profile'),
-
 ]
