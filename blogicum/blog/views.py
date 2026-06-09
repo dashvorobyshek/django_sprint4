@@ -9,7 +9,6 @@ from django.views.generic import CreateView, UpdateView, DeleteView
 from .models import Post, Category, Comment
 from .forms import PostForm, CommentForm, UserForm
 from django.db.models import Count
-from django.http import Http404
 import logging
 
 logger = logging.getLogger(__name__)
@@ -61,28 +60,26 @@ def post_detail(request, post_id):
 
     post = get_object_or_404(Post, pk=post_id)
 
-    if (
-        not post.is_published
-        or not post.category.is_published
-        or post.pub_date > timezone.now()
-    ):
-        if (
-            not request.user.is_authenticated
-            or request.user != post.author
-        ):
-            raise Http404
+    if not request.user.is_authenticated or request.user != post.author:
+        get_object_or_404(
+                Post,
+                pk=post_id,
+                is_published=True,
+                category__is_published=True,
+                pub_date__lte=timezone.now()
+            )
 
     context = {
-        'post': post,
-        'comments': post.comments.all(),
-        'form': CommentForm(),
-    }
+            'post': post,
+            'comments': post.comments.all(),
+            'form': CommentForm(),
+        }
 
     return render(
-        request,
-        'blog/detail.html',
-        context
-    )
+            request,
+            'blog/detail.html',
+            context
+        )
 
 
 def category_posts(request, category_slug):
@@ -253,6 +250,11 @@ class ProfileEditView(LoginRequiredMixin, UpdateView):
     def get_success_url(self):
         return reverse('blog:profile',
                        kwargs={'username': self.request.user.username})
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['is_edit'] = True
+        return context
 
 
 class RegisterView(CreateView):
