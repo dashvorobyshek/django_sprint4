@@ -9,18 +9,23 @@ from django.views.generic import CreateView, UpdateView, DeleteView
 from .models import Post, Category, Comment
 from .forms import PostForm, CommentForm, UserForm
 from django.db.models import Count
+from django.http import Http404
+import logging
 
+logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
 
 def annotate_comment_count(queryset):
+    """Добавляет количество комментариев к каждому посту."""
     return queryset.annotate(
         comment_count=Count('comments')
     )
 
 
 def get_published_posts(posts=None):
+    """Возвращает только опубликованные посты."""
     if posts is None:
         posts = Post.objects.all()
 
@@ -54,32 +59,22 @@ def index(request):
 def post_detail(request, post_id):
     """Детальная страница поста с комментариями."""
 
-    published_post = Post.objects.filter(
-        pk=post_id,
-        is_published=True,
-        category__is_published=True,
-        pub_date__lte=timezone.now()
-    )
+    post = get_object_or_404(Post, pk=post_id)
 
-    if request.user.is_authenticated:
-        author_post = Post.objects.filter(
-            pk=post_id,
-            author=request.user
-        )
-
-        post = get_object_or_404(
-            published_post | author_post
-        )
-    else:
-        post = get_object_or_404(
-            published_post
-        )
-
-    comments = post.comments.all()
+    if (
+        not post.is_published
+        or not post.category.is_published
+        or post.pub_date > timezone.now()
+    ):
+        if (
+            not request.user.is_authenticated
+            or request.user != post.author
+        ):
+            raise Http404
 
     context = {
         'post': post,
-        'comments': comments,
+        'comments': post.comments.all(),
         'form': CommentForm(),
     }
 
@@ -112,6 +107,12 @@ class PostCreateView(LoginRequiredMixin, CreateView):
 
     def form_valid(self, form):
         form.instance.author = self.request.user
+
+        logger.info(
+            'Создан пост пользователем %s',
+            self.request.user.username
+        )
+
         return super().form_valid(form)
 
     def get_success_url(self):
