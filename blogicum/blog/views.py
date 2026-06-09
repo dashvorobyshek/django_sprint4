@@ -9,21 +9,31 @@ from django.views.generic import CreateView, UpdateView, DeleteView
 from .models import Post, Category, Comment
 from .forms import PostForm, CommentForm, UserForm
 from django.db.models import Count
-from django.http import Http404
+
 
 User = get_user_model()
 
 
+def annotate_comment_count(queryset):
+    return queryset.annotate(
+        comment_count=Count('comments')
+    )
+
+
 def get_published_posts(posts=None):
-    """Возвращает опубликованные посты с аннотацией количества комментариев."""
     if posts is None:
         posts = Post.objects.all()
-    return posts.filter(
-        pub_date__lte=timezone.now(),
-        is_published=True,
-        category__is_published=True
-    ).select_related('category', 'location', 'author').annotate(
-        comment_count=Count('comments')
+
+    return annotate_comment_count(
+        posts.filter(
+            pub_date__lte=timezone.now(),
+            is_published=True,
+            category__is_published=True
+        ).select_related(
+            'category',
+            'location',
+            'author'
+        )
     ).order_by('-pub_date')
 
 
@@ -43,22 +53,41 @@ def index(request):
 
 def post_detail(request, post_id):
     """Детальная страница поста с комментариями."""
-    post = get_object_or_404(Post, pk=post_id)
 
-    if not (post.is_published
-            and post.category.is_published
-            and post.pub_date <= timezone.now()):
-        if not (request.user.is_authenticated and request.user == post.author):
-            raise Http404('Пост не найден')
+    published_post = Post.objects.filter(
+        pk=post_id,
+        is_published=True,
+        category__is_published=True,
+        pub_date__lte=timezone.now()
+    )
+
+    if request.user.is_authenticated:
+        author_post = Post.objects.filter(
+            pk=post_id,
+            author=request.user
+        )
+
+        post = get_object_or_404(
+            published_post | author_post
+        )
+    else:
+        post = get_object_or_404(
+            published_post
+        )
 
     comments = post.comments.all()
-    form = CommentForm()
+
     context = {
         'post': post,
         'comments': comments,
-        'form': form,
+        'form': CommentForm(),
     }
-    return render(request, 'blog/detail.html', context)
+
+    return render(
+        request,
+        'blog/detail.html',
+        context
+    )
 
 
 def category_posts(request, category_slug):
@@ -186,10 +215,14 @@ def profile(request, username):
     """Страница профиля пользователя."""
     profile_user = get_object_or_404(User, username=username)
 
-    posts = Post.objects.filter(
-        author=profile_user
-    ).select_related('category', 'location', 'author').annotate(
-        comment_count=Count('comments')
+    posts = annotate_comment_count(
+        Post.objects.filter(
+            author=profile_user
+        ).select_related(
+            'category',
+            'location',
+            'author'
+        )
     ).order_by('-pub_date')
 
     # Если смотрит не хозяин — показываем только опубликованные
